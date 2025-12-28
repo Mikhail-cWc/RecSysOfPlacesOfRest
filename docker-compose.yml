@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: places_db
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-places_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-places_password}
+      POSTGRES_DB: ${POSTGRES_DB:-places_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema_postgres.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-places_user} -d ${POSTGRES_DB:-places_db}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - places_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  places_network:
+    driver: bridge
