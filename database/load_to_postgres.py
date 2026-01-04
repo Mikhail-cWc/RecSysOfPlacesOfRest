@@ -1,8 +1,18 @@
 import json
+import logging
 from pathlib import Path
 
 import pandas as pd
 import psycopg2
+from dotenv import load_dotenv
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
+load_dotenv()
 
 
 def get_connection(
@@ -12,9 +22,7 @@ def get_connection(
     user: str = "places_user",
     password: str = "places_password",
 ) -> psycopg2.extensions.connection:
-    return psycopg2.connect(
-        host=host, port=port, database=database, user=user, password=password
-    )
+    return psycopg2.connect(host=host, port=port, database=database, user=user, password=password)
 
 
 def load_data_to_postgres(
@@ -27,28 +35,26 @@ def load_data_to_postgres(
 ):
     # относительно database/
     script_dir = Path(__file__).parent
-    csv_path = (
-        script_dir / csv_file if not Path(csv_file).is_absolute() else Path(csv_file)
-    )
+    csv_path = script_dir / csv_file if not Path(csv_file).is_absolute() else Path(csv_file)
 
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV файл не найден: {csv_path}")
 
     df = pd.read_csv(csv_path)
-    print(f"Загружено {len(df)} записей")
+    logger.info(f"Загружено {len(df)} записей")
 
-    print(f"Подключение к PostgreSQL ({host}:{port}/{database})...")
+    logger.info(f"Подключение к PostgreSQL ({host}:{port}/{database})...")
     conn = get_connection(host, port, database, user, password)
     cursor = conn.cursor()
 
     try:
-        print("Очистка существующих данных...")
+        logger.info("Очистка существующих данных...")
         cursor.execute("DELETE FROM place_tags")
         cursor.execute("DELETE FROM tags")
         cursor.execute("DELETE FROM places")
         conn.commit()
 
-        print("Загрузка мест в БД...")
+        logger.info("Загрузка мест в БД...")
         inserted_count = 0
 
         for _, row in df.iterrows():
@@ -79,16 +85,8 @@ def load_data_to_postgres(
                         row.get("district"),
                         row.get("address"),
                         float(row["rating"]) if pd.notna(row.get("rating")) else None,
-                        (
-                            int(row["reviews_count"])
-                            if pd.notna(row.get("reviews_count"))
-                            else None
-                        ),
-                        (
-                            int(row["ratings_count"])
-                            if pd.notna(row.get("ratings_count"))
-                            else None
-                        ),
+                        (int(row["reviews_count"]) if pd.notna(row.get("reviews_count")) else None),
+                        (int(row["ratings_count"]) if pd.notna(row.get("ratings_count")) else None),
                         row.get("working_hours"),
                         row.get("website"),
                         phone,
@@ -113,16 +111,8 @@ def load_data_to_postgres(
                         row.get("district"),
                         row.get("address"),
                         float(row["rating"]) if pd.notna(row.get("rating")) else None,
-                        (
-                            int(row["reviews_count"])
-                            if pd.notna(row.get("reviews_count"))
-                            else None
-                        ),
-                        (
-                            int(row["ratings_count"])
-                            if pd.notna(row.get("ratings_count"))
-                            else None
-                        ),
+                        (int(row["reviews_count"]) if pd.notna(row.get("reviews_count")) else None),
+                        (int(row["ratings_count"]) if pd.notna(row.get("ratings_count")) else None),
                         row.get("working_hours"),
                         row.get("website"),
                         phone,
@@ -135,9 +125,9 @@ def load_data_to_postgres(
                 conn.commit()
 
         conn.commit()
-        print(f"Загружено {inserted_count} мест")
+        logger.info(f"Загружено {inserted_count} мест")
 
-        print("Загрузка тегов и создание связей...")
+        logger.info("Загрузка тегов и создание связей...")
         tag_map = {}  # словарь для маппинга имени тега к его ID
 
         for _, row in df.iterrows():
@@ -160,9 +150,7 @@ def load_data_to_postgres(
                             if result:
                                 tag_id = result[0]
                             else:
-                                cursor.execute(
-                                    "SELECT id FROM tags WHERE name = %s", (tag_name,)
-                                )
+                                cursor.execute("SELECT id FROM tags WHERE name = %s", (tag_name,))
                                 tag_id = cursor.fetchone()[0]
                             tag_map[tag_name] = tag_id
                         else:
@@ -177,10 +165,10 @@ def load_data_to_postgres(
                             (place_id, tag_id),
                         )
                 except json.JSONDecodeError:
-                    print(f"Ошибка парсинга JSON для места ID {place_id}")
+                    logger.error(f"Ошибка парсинга JSON для места ID {place_id}")
 
         conn.commit()
-        print("Данные успешно загружены в БД!")
+        logger.info("Данные успешно загружены в БД!")
 
         cursor.execute("SELECT COUNT(*) FROM places")
         places_count = cursor.fetchone()[0]
@@ -191,14 +179,14 @@ def load_data_to_postgres(
         cursor.execute("SELECT COUNT(*) FROM place_tags")
         links_count = cursor.fetchone()[0]
 
-        print("\nСтатистика БД:")
-        print(f"  Мест: {places_count}")
-        print(f"  Тегов: {tags_count}")
-        print(f"  Связей место-тег: {links_count}")
+        logger.info("\nСтатистика БД:")
+        logger.info(f"  Мест: {places_count}")
+        logger.info(f"  Тегов: {tags_count}")
+        logger.info(f"  Связей место-тег: {links_count}")
 
     except Exception as e:
         conn.rollback()
-        print(f"Ошибка при загрузке данных: {e}")
+        logger.error(f"Ошибка при загрузке данных: {e}")
         raise
     finally:
         cursor.close()
