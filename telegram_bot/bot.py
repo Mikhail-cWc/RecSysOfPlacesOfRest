@@ -492,18 +492,36 @@ class PlacesBot:
             logger.error(f"Error handling dislike: {e}", exc_info=True)
             await query.answer("Произошла ошибка.", show_alert=True)
 
+    async def _check_api_health(self, max_retries: int = 5, delay: float = 2.0) -> bool:
+        for attempt in range(max_retries):
+            try:
+                response = await self.http_client.get(f"{self.api_url}/api/health", timeout=5.0)
+                if response.status_code == 200:
+                    logger.info("API is available")
+                    return True
+                else:
+                    logger.warning(f"API returned status {response.status_code}")
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"API is not available (attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"Retrying in {delay:.1f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"API is not available after {max_retries} attempts: {e}")
+                    return False
+        return False
+
     async def run(self):
         logger.info("Starting Telegram bot...")
 
-        try:
-            response = await self.http_client.get(f"{self.api_url}/api/health")
-            if response.status_code == 200:
-                logger.info("API is available")
-            else:
-                logger.warning(f"API returned status {response.status_code}")
-        except Exception as e:
-            logger.error(f"API is not available: {e}")
-            logger.warning("Bot will start, but there may be problems")
+        api_available = await self._check_api_health()
+        if not api_available:
+            logger.warning(
+                "API is not available. Bot will start, but there may be problems. "
+                "The bot will retry API calls when needed."
+            )
 
         await self.app.initialize()
         await self.app.start()
