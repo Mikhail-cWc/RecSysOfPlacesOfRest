@@ -103,39 +103,42 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Функция для поиска мест по тегам
-CREATE OR REPLACE FUNCTION find_places_by_tags(
-    tag_names TEXT[],
-    min_rating REAL DEFAULT 0.0,
-    limit_count INTEGER DEFAULT 20
-)
-RETURNS TABLE (
-    id BIGINT,
-    name TEXT,
-    rating REAL,
-    address TEXT,
-    district TEXT,
-    tag_list TEXT
-) AS $$
+-- Профили пользователей
+CREATE TABLE IF NOT EXISTS user_profiles (
+    telegram_id BIGINT PRIMARY KEY,
+    preferred_tags TEXT[],
+    avoided_tags TEXT[],
+    favorite_districts TEXT[],      
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_profiles_telegram ON user_profiles(telegram_id);
+
+-- История взаимодействий
+CREATE TABLE IF NOT EXISTS user_interactions (
+    id SERIAL PRIMARY KEY,
+    telegram_id BIGINT,
+    place_id BIGINT,
+    interaction_type TEXT,          -- liked, disliked
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (place_id) REFERENCES places(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_interactions_telegram ON user_interactions(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_user_interactions_place ON user_interactions(place_id);
+CREATE INDEX IF NOT EXISTS idx_user_interactions_type ON user_interactions(interaction_type);
+
+-- Функция для обновления timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
 BEGIN
-    RETURN QUERY
-    SELECT DISTINCT
-        p.id,
-        p.name,
-        p.rating,
-        p.address,
-        p.district,
-        pwt.tag_list
-    FROM places p
-    INNER JOIN place_tags pt ON p.id = pt.place_id
-    INNER JOIN tags t ON pt.tag_id = t.id
-    LEFT JOIN places_with_tags pwt ON p.id = pwt.id
-    WHERE p.rating >= min_rating
-      AND t.name = ANY(tag_names)
-    GROUP BY p.id, p.name, p.rating, p.address, p.district, pwt.tag_list
-    HAVING COUNT(DISTINCT t.name) = array_length(tag_names, 1)
-    ORDER BY p.rating DESC, p.reviews_count DESC
-    LIMIT limit_count;
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER update_user_profiles_updated_at
+    BEFORE UPDATE ON user_profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
