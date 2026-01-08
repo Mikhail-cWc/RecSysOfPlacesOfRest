@@ -464,6 +464,22 @@ class SearchTools:
                 except Exception:
                     pass
 
+    def select_places_to_show(self, place_ids: list[int]) -> list[dict[str, Any]]:
+        """
+        Финальный выбор мест для показа пользователю.
+
+        Агент вызывает этот инструмент когда готов дать рекомендации,
+        передавая ID мест которые считает наиболее подходящими.
+        """
+        logger.info(f"select_places_to_show: {len(place_ids)} places selected by agent")
+
+        if not place_ids:
+            return []
+
+        place_ids = place_ids[:7]
+
+        return self.get_places_details(place_ids)
+
     def get_all_districts(self) -> list[str]:
         """
         Получить список всех районов из базы данных.

@@ -36,6 +36,16 @@ class SearchByGeoInput(BaseModel):
     limit: int = Field(default=50, description="Максимальное количество результатов")
 
 
+class SelectPlacesToShowInput(BaseModel):
+    """
+    Входные данные для инструмента select_places_to_show.
+    """
+
+    place_ids: list[int] = Field(
+        description="Список ID мест для показа пользователю (выбери самые подходящие, максимум 7)"
+    )
+
+
 class PlacesRecommendationAgent:
     """
     LLM-агент для рекомендаций мест досуга.
@@ -105,6 +115,32 @@ class PlacesRecommendationAgent:
                 place_ids = [int(pid) if isinstance(pid, str) else pid for pid in place_ids]
 
             return self.search_tools.rank_personalized(place_ids, telegram_id)
+
+        def select_places_to_show_tool(tool_input: str) -> list[dict]:
+            """
+            Финальный выбор мест для показа пользователю.
+            """
+            import json
+
+            try:
+                if isinstance(tool_input, str):
+                    data = json.loads(tool_input)
+                elif isinstance(tool_input, dict):
+                    data = tool_input
+                else:
+                    raise ValueError(f"Unexpected input type: {type(tool_input)}")
+
+                place_ids = data.get("place_ids", [])
+            except (json.JSONDecodeError, AttributeError) as e:
+                raise ValueError(f"Invalid input format: {e}")
+
+            if not place_ids:
+                raise ValueError("place_ids is required for select_places_to_show")
+
+            if isinstance(place_ids, list):
+                place_ids = [int(pid) if isinstance(pid, str) else pid for pid in place_ids]
+
+            return self.search_tools.select_places_to_show(place_ids)
 
         tags_description = ""
         if self.available_tags:
@@ -218,6 +254,24 @@ Telegram_id автоматически используется для теку�
 
 Возвращает отранжированный список мест с дополнительным полем personalization_score""",
             ),
+            Tool(
+                name="select_places_to_show",
+                func=select_places_to_show_tool,
+                description="""ФИНАЛЬНЫЙ ВЫБОР мест для показа пользователю.
+
+КОГДА ИСПОЛЬЗОВАТЬ:
+- ОБЯЗАТЕЛЬНО вызывай ПЕРЕД Final Answer с рекомендациями
+- После того как получил кандидатов через search_by_preferences или search_by_geo
+- Выбери из найденных мест самые подходящие для запроса пользователя
+
+ВАЖНО:
+- Выбери от 3 до 7 мест (сам решаешь сколько, но не больше 7)
+- Передай JSON с place_ids: {"place_ids": [123, 456, 789]}
+- Учитывай разнообразие - не выбирай 5 одинаковых кафе
+- Приоритизируй места которые лучше всего соответствуют запросу
+
+Возвращает полную информацию о выбранных местах""",
+            ),
         ]
 
     def _create_prompt(self) -> PromptTemplate:
@@ -287,8 +341,12 @@ User: "Хочу активный отдых, может быть лыжи?"
 Thought: Пользователь хочет активный отдых и лыжи - есть конкретные критерии, нужен семантический поиск
 Action: search_by_preferences
 Action Input: {{{{"query": "активный отдых лыжи сноуборд", "min_rating": 4.0, "limit": 50}}}}
-Observation: [список найденных мест...]
-Thought: Нашёл подходящие места. Дам краткий ответ без деталей - они будут в карточках
+Observation: [список найденных мест с id: 123, 456, 789, 101, 202, ...]
+Thought: Нашёл места. Теперь выберу самые подходящие для показа пользователю
+Action: select_places_to_show
+Action Input: {{{{"place_ids": [123, 456, 789, 101, 202]}}}}
+Observation: [детальная информация о выбранных местах]
+Thought: Отлично, места выбраны. Дам краткий ответ
 Final Answer: [TYPE: recommendation]
 Нашёл для тебя несколько отличных мест для активного отдыха с лыжами! Смотри варианты ниже 👇
 
@@ -297,8 +355,12 @@ User: "Кафе рядом с Кремлем"
 Thought: Указана конкретная локация (Кремль) - нужен геопоиск
 Action: search_by_geo
 Action Input: {{{{"location": "Кремль", "radius_meters": 1500, "min_rating": 4.0, "limit": 50}}}}
-Observation: [список найденных мест...]
-Thought: Нашёл кафе рядом с Кремлём. Дам краткий ответ
+Observation: [список найденных мест с id: 111, 222, 333, 444, 555, ...]
+Thought: Нашёл кафе. Выберу лучшие для показа
+Action: select_places_to_show
+Action Input: {{{{"place_ids": [111, 222, 333, 444]}}}}
+Observation: [детальная информация о выбранных местах]
+Thought: Места выбраны, даю рекомендацию
 Final Answer: [TYPE: recommendation]
 Вот уютные кафе неподалёку от Кремля 😊
 
@@ -317,7 +379,7 @@ User: "Покажи кафе в центре"
 Thought: Нужен геопоиск в центре
 Action: search_by_geo
 Action Input: {{{{"location": "центр", "radius_meters": 2000, "tags": ["Кафе"], "min_rating": 4.0, "limit": 50}}}}
-Observation: [список из 50 кафе с их id...]
+Observation: [список из 50 кафе с их id: 123, 456, 789, ...]
 Thought: Много результатов. Если у пользователя есть история, можно переранжировать
 Action: get_user_profile
 Action Input: ""
@@ -325,7 +387,11 @@ Observation: {{{{"is_empty": false, "preferred_tags": ["Кафе", "Бары"]}}
 Thought: У пользователя есть профиль, переранжирую результаты
 Action: rank_personalized
 Action Input: {{{{"place_ids": [123, 456, 789, ...]}}}}
-Observation: [отранжированный список с personalization_score...]
+Observation: [отранжированный список с personalization_score: 123, 789, 456, ...]
+Thought: Результаты переранжированы. Теперь выберу лучшие места для показа
+Action: select_places_to_show
+Action Input: {{{{"place_ids": [123, 789, 456, 101, 202]}}}}
+Observation: [детальная информация о выбранных местах]
 Thought: Готово! Даю персонализированные рекомендации
 Final Answer: [TYPE: recommendation]
 Нашёл для тебя кафе в центре, отсортированные по твоим предпочтениям! 😊
@@ -339,6 +405,10 @@ Final Answer: [TYPE: recommendation]
 ✓ Если tools вернули пустой результат - скажи об этом и предложи расширить поиск
 ✓ Используй русский язык в параметре query для search_by_preferences
 ✓ Используй ТОЛЬКО параметры, определенные в схеме инструмента (не добавляй query в search_by_geo!)
+✓ ОБЯЗАТЕЛЬНО вызывай select_places_to_show ПЕРЕД Final Answer с рекомендациями!
+  - Выбери от 3 до 7 мест из найденных (сам решай сколько подходит)
+  - Учитывай разнообразие - не выбирай одинаковые места
+  - Приоритизируй места которые лучше соответствуют запросу
 
 ВАЖНО ПРИ РЕКОМЕНДАЦИИ МЕСТ:
 ✓ НЕ описывай подробно каждое место в тексте - места будут показаны отдельно в карточках
@@ -492,11 +562,39 @@ Thought:{{agent_scratchpad}}"""
     def _extract_places_from_result(self, result: dict) -> list[dict]:
         """
         Извлечение информации о местах из результата выполнения агента.
+
+        Приоритет: select_places_to_show > fallback (top-10 из всех результатов)
+        """
+        intermediate_steps = result.get("intermediate_steps", [])
+
+        selected_places = self._extract_from_select_places_to_show(intermediate_steps)
+        if selected_places:
+            logger.info(f"Using {len(selected_places)} places from select_places_to_show")
+            return selected_places
+
+        logger.warning("select_places_to_show not called, using fallback extraction")
+        return self._extract_fallback_places(intermediate_steps)
+
+    def _extract_from_select_places_to_show(self, intermediate_steps: list) -> list[dict]:
+        """
+        Извлечь места из вызова select_places_to_show (если был).
+        """
+        for step in intermediate_steps:
+            if len(step) >= 2:
+                action, observation = step[0], step[1]
+
+                if hasattr(action, "tool") and action.tool == "select_places_to_show":
+                    if isinstance(observation, list):
+                        return observation
+
+        return []
+
+    def _extract_fallback_places(self, intermediate_steps: list) -> list[dict]:
+        """
+        Fallback: извлечь top-10 мест из всех результатов поиска.
         """
         places = []
         seen_ids = set()
-
-        intermediate_steps = result.get("intermediate_steps", [])
 
         for step in intermediate_steps:
             if len(step) >= 2:
