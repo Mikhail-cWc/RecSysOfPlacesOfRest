@@ -5,11 +5,7 @@ from app.api.routes import auth, health, telegram
 from app.core.config import settings
 from app.core.database import db_manager
 from app.core.models import Base
-from app.core.tracing import (
-    init_phoenix_tracing,
-    instrument_langchain,
-    instrument_openai,
-)
+from app.core.tracing import init_phoenix_tracing, instrument_langchain
 from app.middleware.rate_limit import setup_rate_limiting
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,7 +24,6 @@ async def lifespan(app: FastAPI):
 
     init_phoenix_tracing()
     instrument_langchain()
-    instrument_openai()
 
     try:
         engine = db_manager.get_engine()

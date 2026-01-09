@@ -52,22 +52,3 @@ def instrument_langchain():
         logger.info("LangChain instrumentation enabled")
     except Exception as e:
         logger.error(f"Failed to instrument LangChain: {e}")
-
-
-def instrument_openai():
-    """
-    Трейсы OpenAI с помощью OpenInference.
-
-    Автоматически добавляет трейсинг для всех операций OpenAI:
-    - LLM вызовы
-    - Embedding генерация
-    - Токены и стоимость
-    - Latency
-    """
-    try:
-        from openinference.instrumentation.openai import OpenAIInstrumentor
-
-        OpenAIInstrumentor().instrument()
-        logger.info("OpenAI instrumentation enabled")
-    except Exception as e:
-        logger.error(f"Failed to instrument OpenAI: {e}")
